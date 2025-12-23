@@ -1,62 +1,73 @@
-# Gold Price Prediction Using Dual-Timeframe LSTM (Big Brother / Little Brother Model)
+# Gold Price Prediction V2 (Improved Dual-Timeframe LSTM)
 
 **Created by:** Daryl James Padogdog
 
 ## 📌 Overview
+This project implements an **improved dual-timeframe LSTM-based price prediction system for Gold (XAUUSD)**.
+It significantly enhances the original model by incorporating **technical indicators, efficient memory management, and a robust 2025 Out-of-Sample testing strategy**.
 
-This project implements a **dual-timeframe LSTM-based price prediction system for Gold (XAUUSD)** using historical market data.
-The system mimics how human traders analyze the market by combining:
-
+The system mimics human trading by combining:
 *   **Higher timeframe trend analysis (1H candles)**
 *   **Lower timeframe entry confirmation (5-minute candles)**
 
-To achieve this, two separate LSTM models are trained:
+## 🚀 Key Improvements in V2
 
-*   **Big Brother Model →** Identifies the overall market trend
-*   **Little Brother Model →** Confirms precise trade entries
+| Feature | Original (V1) | Improved (V2) |
+| :--- | :--- | :--- |
+| **Features** | 1 (Close Price) | **17 Features** (OHLCV + Technical Indicators) |
+| **Architecture** | Simple LSTM | **Bidirectional LSTM + Global Pooling** |
+| **Memory** | High (float64) | **Efficient (float32 + Garbage Collection)** |
+| **Risk Management** | None | **1% SL / 2% TP** |
+| **Validation** | Random Split | **Strict 2025 Out-of-Sample Test** |
 
-The final output is a **BUY / SELL / WAIT** trading signal based on the alignment of both models.
+## 🧠 Model Architecture
 
-## 🧠 Concept: Big Brother vs Little Brother
+Two separate models work in tandem:
+1.  **Big Brother (`big_brother_v2.keras`)**: Analyzes 1-week of 1H data (168 candles) to determine the macro trend.
+2.  **Little Brother (`little_brother_v2.keras`)**: Analyzes 4-hours of 5m data (48 candles) for entry confirmation.
 
-| Model | Name | Timeframe | Purpose |
-| :--- | :--- | :--- | :--- |
-| **Big Brother** | `big_brother_model.keras` | 1 Hour | Determines overall market trend (Bullish / Bearish) |
-| **Little Brother** | `little_brother_model.keras` | 5 Minutes | Confirms short-term entry or exit signals |
+**Technical Indicators Used:**
+- RSI (14)
+- MACD (12, 26, 9)
+- Bollinger Bands (20, 2)
+- ATR (14)
+- EMA (20, 50)
+- Volatility
 
-**The system only enters trades when both timeframes agree, reducing false signals and improving decision reliability.**
+## 📂 Configuration & Data Strategy
 
-## 📂 Configuration
+**Training Data:**
+- `TRAIN_1h.csv`: 1-Hour historical data (2024 and earlier)
+- `TRAIN_5m.csv`: 5-Minute historical data (2024 and earlier)
 
-*   **Training Data:**
-    *   `XAU_1h_data.csv` (1-Hour Data)
-    *   `XAU_5m_data.csv` (5-Minute Data)
-*   **Lookback Periods:**
-    *   Big Brother: 720 candles
-    *   Little Brother: 48 candles
+**Testing Data (2025 Out-of-Sample):**
+- `TEST_1h.csv`: 2025 1-Hour data
+- `TEST_5m.csv`: 2025 5-Minute data
 
-## 🚀 Usage
+**Performance is evaluated strictly on unknown 2025 data to ensure reliability.**
 
-The project is structured as a Jupyter Notebook (`Trading_AI_model .ipynb`) that:
-1.  Loads and preprocesses data.
-2.  Trains both LSTM models.
-3.  Performs a live trading simulation.
-4.  Backtests performance over the last 365 days.
+## 🛠️ Usage
 
-## 📊 Performance (Example)
+### Option 1: Google Colab (Recommended)
+1.  Upload `Trading_AI_model_V2.py` to your Colab session.
+2.  Upload the 4 CSV files (`TRAIN_1h.csv`, `TRAIN_5m.csv`, `TEST_1h.csv`, `TEST_5m.csv`).
+3.  Run the script:
+    ```bash
+    python Trading_AI_model_V2.py
+    ```
 
-During testing (last 365 days), the model achieved:
-*   **Win Rate:** ~50.78%
-*   **Total Operations:** 100k+ candles analyzed
+### Option 2: Local Execution
+Ensure you have the required libraries installed:
+```bash
+pip install pandas numpy tensorflow scikit-learn plotly
+python Trading_AI_model_V2.py
+```
 
-### Visual Results
-*   **Yellow Line:** AI Prediction (Model)
-*   **Green Line:** Real Data (Market)
+## 📊 Evaluation Metrics
+The V2 model outputs a comprehensive dashboard (`trading_performance_v2.html`) including:
+- **Win Rate %**
+- **Profit Factor** (Gross Profit / Gross Loss)
+- **Sharpe Ratio** (Risk-adjusted return)
+- **Maximum Drawdown %**
 
-![Model Structure](model.png)
-
-![Test Results - Yellow (AI) vs Green (Real)](Screenshot%202025-12-24%20025934.png)
-
-*(Note: Past performance is not indicative of future results.)*
-
-# A I _ T R A D I N G _ M O D E L
+## A I _ T R A D I N G _ M O D E L _ V 2
