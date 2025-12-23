@@ -17,6 +17,24 @@ To achieve this, two separate LSTM models are trained:
 
 The final output is a **BUY / SELL / WAIT** trading signal based on the alignment of both models.
 
+## 📊 Performance (Example)
+
+During testing (last 365 days), the model achieved:
+*   **Win Rate:** ~50.78%
+*   **Total Operations:** 100k+ candles analyzed
+
+### Visual Results
+*   **Yellow Line:** AI Prediction (Model)
+*   **Green Line:** Real Data (Market)
+
+![Model Structure](model.png)
+
+![Test Results - Yellow (AI) vs Green (Real)](Screenshot%202025-12-24%20025934.png)
+
+*(Note: Past performance is not indicative of future results.)*
+
+# A I _ T R A D I N G _ M O D E L
+
 ## 🧠 Concept: Big Brother vs Little Brother
 
 | Model | Name | Timeframe | Purpose |
@@ -43,20 +61,4 @@ The project is structured as a Jupyter Notebook (`Trading_AI_model .ipynb`) that
 3.  Performs a live trading simulation.
 4.  Backtests performance over the last 365 days.
 
-## 📊 Performance (Example)
 
-During testing (last 365 days), the model achieved:
-*   **Win Rate:** ~50.78%
-*   **Total Operations:** 100k+ candles analyzed
-
-### Visual Results
-*   **Yellow Line:** AI Prediction (Model)
-*   **Green Line:** Real Data (Market)
-
-![Model Structure](model.png)
-
-![Test Results - Yellow (AI) vs Green (Real)](Screenshot%202025-12-24%20025934.png)
-
-*(Note: Past performance is not indicative of future results.)*
-
-# A I _ T R A D I N G _ M O D E L
