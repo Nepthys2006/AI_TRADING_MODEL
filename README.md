@@ -22,9 +22,31 @@ The system mimics human trading by combining:
 
 ## 🧠 Model Architecture
 
+<<<<<<< HEAD
 Two separate models work in tandem:
 1.  **Big Brother (`big_brother_v2.keras`)**: Analyzes 1-week of 1H data (168 candles) to determine the macro trend.
 2.  **Little Brother (`little_brother_v2.keras`)**: Analyzes 4-hours of 5m data (48 candles) for entry confirmation.
+=======
+## 📊 Performance (Example)
+
+During testing (last 365 days), the model achieved:
+*   **Win Rate:** ~50.78%
+*   **Total Operations:** 100k+ candles analyzed
+
+### Visual Results
+*   **Yellow Line:** AI Prediction (Model)
+*   **Green Line:** Real Data (Market)
+
+![Model Structure](model.png)
+
+![Test Results - Yellow (AI) vs Green (Real)](Screenshot%202025-12-24%20025934.png)
+
+*(Note: Past performance is not indicative of future results.)*
+
+# A I _ T R A D I N G _ M O D E L
+
+## 🧠 Concept: Big Brother vs Little Brother
+>>>>>>> b734ee3ffb2092bb5d03c8e217ba66cd80d91670
 
 **Technical Indicators Used:**
 - RSI (14)
@@ -48,6 +70,7 @@ Two separate models work in tandem:
 
 ## 🛠️ Usage
 
+<<<<<<< HEAD
 ### Option 1: Google Colab (Recommended)
 1.  Upload `Trading_AI_model_V2.py` to your Colab session.
 2.  Upload the 4 CSV files (`TRAIN_1h.csv`, `TRAIN_5m.csv`, `TEST_1h.csv`, `TEST_5m.csv`).
@@ -71,3 +94,6 @@ The V2 model outputs a comprehensive dashboard (`trading_performance_v2.html`) i
 - **Maximum Drawdown %**
 
 ## A I _ T R A D I N G _ M O D E L _ V 2
+=======
+
+>>>>>>> b734ee3ffb2092bb5d03c8e217ba66cd80d91670
