@@ -22,31 +22,9 @@ The system mimics human trading by combining:
 
 ## 🧠 Model Architecture
 
-<<<<<<< HEAD
 Two separate models work in tandem:
 1.  **Big Brother (`big_brother_v2.keras`)**: Analyzes 1-week of 1H data (168 candles) to determine the macro trend.
 2.  **Little Brother (`little_brother_v2.keras`)**: Analyzes 4-hours of 5m data (48 candles) for entry confirmation.
-=======
-## 📊 Performance (Example)
-
-During testing (last 365 days), the model achieved:
-*   **Win Rate:** ~50.78%
-*   **Total Operations:** 100k+ candles analyzed
-
-### Visual Results
-*   **Yellow Line:** AI Prediction (Model)
-*   **Green Line:** Real Data (Market)
-
-![Model Structure](model.png)
-
-![Test Results - Yellow (AI) vs Green (Real)](Screenshot%202025-12-24%20025934.png)
-
-*(Note: Past performance is not indicative of future results.)*
-
-# A I _ T R A D I N G _ M O D E L
-
-## 🧠 Concept: Big Brother vs Little Brother
->>>>>>> b734ee3ffb2092bb5d03c8e217ba66cd80d91670
 
 **Technical Indicators Used:**
 - RSI (14)
@@ -55,6 +33,34 @@ During testing (last 365 days), the model achieved:
 - ATR (14)
 - EMA (20, 50)
 - Volatility
+
+## 📊 Performance & Visualization
+
+### AI Model Performance (Dual-Timeframe)
+The graph below demonstrates the model's prediction capabilities against real market data.
+![AI Model Performance](images/AI_MODEL_PERFORMANCE.png)
+
+### 📊 Key Performance Metrics
+*   **Win Rate / Accuracy:** 51.76%
+*   **Total Operations:** 49,396 candles analyzed
+*   **Confirmed Trades:** 11,734
+*   **Total Wins:** 6,073
+*   **Total Losses:** 5,661
+*   **Estimated Return:** 48.24% (Compounded)
+
+### Wealth Simulation (Paper Trading)
+A Monte Carlo simulation projecting the growth of **$200** initial capital based on the model's historical win rate and risk parameters.
+
+**2026 Projection:**
+*   **Projected Median:** $301.47 (Likely Outcome)
+*   **Optimistic (90%):** $372.55 (Possible Upside)
+*   **Pessimistic (10%):** $245.24 (Conservative Estimate)
+
+![Paper Trade Simulation](images/PAPER_TRADE_OF_AIMODEL_200.png)
+
+### Future Outlook (2026-2027)
+Projected trend analysis for XAU/USD for the upcoming years.
+![Future Prediction 2026-2027](images/predictedXAU-USD_2026-2027.png)
 
 ## 📂 Configuration & Data Strategy
 
@@ -70,9 +76,8 @@ During testing (last 365 days), the model achieved:
 
 ## 🛠️ Usage
 
-<<<<<<< HEAD
 ### Option 1: Google Colab (Recommended)
-1.  Upload `Trading_AI_model_V2.py` to your Colab session.
+1.  Upload `Trading_AI_model_V2.py` (or individual training scripts) to your Colab session.
 2.  Upload the 4 CSV files (`TRAIN_1h.csv`, `TRAIN_5m.csv`, `TEST_1h.csv`, `TEST_5m.csv`).
 3.  Run the script:
     ```bash
@@ -92,8 +97,3 @@ The V2 model outputs a comprehensive dashboard (`trading_performance_v2.html`) i
 - **Profit Factor** (Gross Profit / Gross Loss)
 - **Sharpe Ratio** (Risk-adjusted return)
 - **Maximum Drawdown %**
-
-## A I _ T R A D I N G _ M O D E L _ V 2
-=======
-
->>>>>>> b734ee3ffb2092bb5d03c8e217ba66cd80d91670

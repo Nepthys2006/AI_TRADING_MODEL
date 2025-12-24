@@ -1,5 +1,5 @@
 # ===========================================
-# GOLD PRICE PREDICTION V2 - IMPROVED MODEL
+# GOLD PRICE PREDICTION V2
 # ===========================================
 # Created by: Daryl James Padogdog
 # Improvements: Technical Indicators, Bidirectional LSTM, 
@@ -27,9 +27,9 @@ from tensorflow.keras.optimizers import Adam
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# ===========================================
-# 1. CONFIGURATION
-# ===========================================
+# =============
+# CONFIGURATION
+# =============
 # Data paths - files in current directory (for Colab)
 # Training files (2024 and earlier)
 TRAIN_BIG = 'TRAIN_1h.csv'
@@ -45,14 +45,18 @@ LOOKBACK_SMALL = 48   # 4 hours of 5-min data
 MODEL_BIG_NAME = 'big_brother_v2.keras'
 MODEL_SMALL_NAME = 'little_brother_v2.keras'
 
-# Trading Parameters
-CONFIDENCE_THRESHOLD = 0.001  # 0.1% minimum price change to trade
-STOP_LOSS_PCT = 0.01          # 1% stop loss
-TAKE_PROFIT_PCT = 0.02        # 2% take profit
+# Trading Parameters - V2.1 Enhanced
+ATR_MULTIPLIER = 1.5           # Dynamic threshold: only trade if predicted move > 1.5 * ATR
+RSI_DEAD_ZONE_LOW = 45         # RSI Dead Zone: WAIT if RSI between 45-55
+RSI_DEAD_ZONE_HIGH = 55
+SPREAD_FEE = 0.0003            # Transaction cost: 0.03% per trade (spread/slippage)
+STOP_LOSS_PCT = 0.01           # 1% initial stop loss
+TAKE_PROFIT_PCT = 0.02         # 2% take profit
+TRAILING_STOP_PCT = 0.005      # 0.5% trailing stop (moves with price)
 
-# ===========================================
-# 2. TECHNICAL INDICATORS
-# ===========================================
+# =============
+# TECHNICAL INDICATORS
+# =============
 def calculate_rsi(prices, period=14):
     """Calculate Relative Strength Index"""
     delta = prices.diff()
@@ -126,9 +130,9 @@ def add_technical_indicators(df):
     
     return df
 
-# ===========================================
-# 3. DATA PREPROCESSING
-# ===========================================
+# =============
+# DATA PREPROCESSING
+# =============
 def load_and_preprocess(filepath, sep=';'):
     """Load data and add technical indicators"""
     print(f"Loading {filepath}...")
@@ -158,9 +162,6 @@ def create_sequences(data, lookback, feature_cols, target_col='Close'):
     feature_data = data[feature_cols].values.astype('float32')
     target_data = data[target_col].values.astype('float32')
     
-    # Use strided slicing to create sequences without copying data (if possible)
-    # or just simple list comprehension but ensuring float32
-    
     X, y = [], []
     for i in range(lookback, len(data)):
         X.append(feature_data[i-lookback:i])
@@ -182,9 +183,9 @@ def normalize_data(df, feature_cols):
     
     return df_scaled, scaler, close_scaler
 
-# ===========================================
-# 4. MODEL ARCHITECTURE - IMPROVED
-# ===========================================
+# =============
+# MODEL ARCHITECTURE
+# =============
 def build_improved_model(input_shape, name="model"):
     """Build Bidirectional LSTM with improved architecture"""
     
@@ -260,9 +261,9 @@ def train_model_v2(X_train, y_train, model_name, epochs=100):
     
     return model, history
 
-# ===========================================
-# 5. EVALUATION METRICS
-# ===========================================
+# =============
+# EVALUATION METRICS
+# =============
 def calculate_sharpe_ratio(returns, risk_free_rate=0.02):
     """Calculate Sharpe Ratio (annualized)"""
     excess_returns = returns - risk_free_rate/252
@@ -280,8 +281,13 @@ def calculate_profit_factor(trades):
     losses = abs(trades[trades < 0].sum())
     return profits / losses if losses > 0 else float('inf')
 
-def backtest_with_metrics(real_prices, predicted_prices, test_dates):
-    """Run backtest and calculate comprehensive metrics"""
+def backtest_with_metrics(real_prices, predicted_prices, test_dates, atr_values, rsi_values):
+    """Run backtest with V2.1 advanced features:
+    - Dynamic ATR-based confidence threshold
+    - RSI Dead Zone (avoid ranging markets)
+    - Transaction costs (spread fee)
+    - Trailing Stop Loss
+    """
     
     results = {
         'total_trades': 0,
@@ -302,13 +308,21 @@ def backtest_with_metrics(real_prices, predicted_prices, test_dates):
         current_price = real_prices[i]
         predicted_next = predicted_prices[i]
         actual_next = real_prices[i + 1]
+        current_atr = atr_values[i] if i < len(atr_values) else atr_values[-1]
+        current_rsi = rsi_values[i] if i < len(rsi_values) else 50
         
         # Calculate predicted change percentage
         predicted_change = (predicted_next - current_price) / current_price
         
-        # Only trade if confidence threshold met
-        if abs(predicted_change) < CONFIDENCE_THRESHOLD:
-            signals.append('WAIT')
+        # Dynamic ATR-based threshold (only trade if move > 1.5 * ATR)
+        atr_threshold = (current_atr / current_price) * ATR_MULTIPLIER
+        if abs(predicted_change) < atr_threshold:
+            signals.append('WAIT-ATR')
+            continue
+        
+        # RSI Dead Zone - avoid ranging markets
+        if RSI_DEAD_ZONE_LOW <= current_rsi <= RSI_DEAD_ZONE_HIGH:
+            signals.append('WAIT-RSI')
             continue
         
         # Generate signal
@@ -323,29 +337,43 @@ def backtest_with_metrics(real_prices, predicted_prices, test_dates):
         # Calculate actual return
         actual_return = (actual_next - current_price) / current_price
         
-        # Apply stop loss / take profit
+        # Trailing Stop Loss Logic
+        # For simplicity in single-candle backtest, we simulate trailing stop:
+        # If price moves in our favor, we tighten the stop
+        trailing_stop = TRAILING_STOP_PCT
+        
         if signal == 'BUY':
-            if actual_return < -STOP_LOSS_PCT:
-                trade_return = -STOP_LOSS_PCT
-            elif actual_return > TAKE_PROFIT_PCT:
-                trade_return = TAKE_PROFIT_PCT
+            # If price moved up 1%, the stop moves up to (1% - 0.5% trailing) = +0.5%
+            # If price is down, it stays at -1% (Initial SL)
+            current_gain = (actual_next - current_price) / current_price
+            effective_stop = max(-STOP_LOSS_PCT, current_gain - TRAILING_STOP_PCT)
+            
+            if actual_next < current_price * (1 + effective_stop):
+                trade_return = effective_stop # Hit the trailing stop
+            elif actual_next > current_price * (1 + TAKE_PROFIT_PCT):
+                trade_return = TAKE_PROFIT_PCT # Hit TP
             else:
-                trade_return = actual_return
-        else:  # SELL
-            if actual_return > STOP_LOSS_PCT:
-                trade_return = -STOP_LOSS_PCT
-            elif actual_return < -TAKE_PROFIT_PCT:
+                trade_return = actual_return # Still in trade
+        
+        else: # SELL
+            current_gain = (current_price - actual_next) / current_price
+            effective_stop = max(-STOP_LOSS_PCT, current_gain - TRAILING_STOP_PCT)
+            
+            if actual_next > current_price * (1 - effective_stop):
+                trade_return = effective_stop
+            elif actual_next < current_price * (1 - TAKE_PROFIT_PCT):
                 trade_return = TAKE_PROFIT_PCT
             else:
                 trade_return = -actual_return
         
+        # Subtract transaction cost (spread fee)
+        trade_return -= SPREAD_FEE
+        
         trades.append(trade_return)
         returns.append(trade_return)
         
-        # Check win/loss
-        if signal == 'BUY' and actual_next > current_price:
-            results['wins'] += 1
-        elif signal == 'SELL' and actual_next < current_price:
+        # Check win/loss (after costs)
+        if trade_return > 0:
             results['wins'] += 1
         else:
             results['losses'] += 1
@@ -363,9 +391,9 @@ def backtest_with_metrics(real_prices, predicted_prices, test_dates):
     
     return results, trades, signals
 
-# ===========================================
-# 6. MAIN EXECUTION
-# ===========================================
+# =============
+# MAIN EXECUTION
+# =============
 if __name__ == "__main__":
     print("=" * 50)
     print("GOLD PRICE PREDICTION V2 - IMPROVED MODEL")
@@ -379,9 +407,9 @@ if __name__ == "__main__":
         'BB_Width', 'BB_Position', 'ATR', 'Volatility'
     ]
     
-    # ==========================================
-    # LOAD AND PREPROCESS TRAINING DATA
-    # ==========================================
+    # =============
+    # LOAD TRAIN DATA
+    # =============
     print("\nLoading TRAINING data (2024 and earlier)...")
     df_train_big = load_and_preprocess(TRAIN_BIG)
     df_train_small = load_and_preprocess(TRAIN_SMALL)
@@ -389,15 +417,15 @@ if __name__ == "__main__":
     print(f"\nFeatures being used: {len(FEATURE_COLS)}")
     print(FEATURE_COLS)
     
-    # ==========================================
-    # NORMALIZE TRAINING DATA
-    # ==========================================
+    # =============
+    # NORMALIZE DATA
+    # =============
     df_train_big_scaled, _, scaler_big = normalize_data(df_train_big, FEATURE_COLS)
     df_train_small_scaled, _, scaler_small = normalize_data(df_train_small, FEATURE_COLS)
     
-    # ==========================================
-    # PREPARE TRAINING SEQUENCES
-    # ==========================================
+    # =============
+    # PREPARE SEQUENCES
+    # =============
     # Big Brother (1H data) - use ALL training data
     X_train_big, y_train_big = create_sequences(df_train_big_scaled, LOOKBACK_BIG, FEATURE_COLS)
     
@@ -418,15 +446,39 @@ if __name__ == "__main__":
     print(f"\nLittle Brother - Training samples: {len(X_train_small)}")
     print(f"Input shape: {X_train_small.shape}")
     
-    # ==========================================
+    # =============
     # TRAIN MODELS
-    # ==========================================
+    # =============
+    
+    # ==== TRAIN BIG BROTHER ====
+    print("\n" + "=" * 50)
+    print("TRAINING BIG BROTHER MODEL")
+    print("=" * 50)
     big_model, big_history = train_model_v2(X_train_big, y_train_big, MODEL_BIG_NAME)
+    
+    # Immediately free Big Brother training data
+    del X_train_big, y_train_big, big_history, big_model
+    gc.collect()
+    
+    # Give the system a moment to stabilize
+    import time
+    time.sleep(2)
+    print("✓ Big Brother trained and saved. Memory freed.")
+    
+    # ==== TRAIN LITTLE BROTHER ====
+    print("\n" + "=" * 50)
+    print("TRAINING LITTLE BROTHER MODEL")
+    print("=" * 50)
     small_model, small_history = train_model_v2(X_train_small, y_train_small, MODEL_SMALL_NAME)
     
-    # ==========================================
-    # BACKTEST ON 2025 TEST DATA
-    # ==========================================
+    # Free Little Brother training data (keep only the model)
+    del X_train_small, y_train_small, small_history
+    gc.collect()
+    print("✓ Little Brother trained and saved. Memory freed.")
+    
+    # =============
+    # BACKTEST (2025)
+    # =============
     print("\n" + "=" * 50)
     print("BACKTESTING ON 2025 TEST DATA")
     print("=" * 50)
@@ -452,12 +504,18 @@ if __name__ == "__main__":
     predicted_scaled = small_model.predict(X_test, verbose=1)
     predicted_prices = scaler_small.inverse_transform(predicted_scaled).flatten()
     
-    # Run backtest
-    metrics, trades, signals = backtest_with_metrics(real_prices, predicted_prices, test_dates)
+    # Extract ATR and RSI values for backtest (aligning with test data)
+    atr_values = df_test_small['ATR'].iloc[LOOKBACK_SMALL:].values
+    rsi_values = df_test_small['RSI'].iloc[LOOKBACK_SMALL:].values
     
-    # ==========================================
+    # Run backtest with advanced V2.1 features
+    metrics, trades, signals = backtest_with_metrics(
+        real_prices, predicted_prices, test_dates, atr_values, rsi_values
+    )
+    
+    # =============
     # RESULTS
-    # ==========================================
+    # =============
     print("\n" + "=" * 50)
     print("BACKTEST RESULTS")
     print("=" * 50)
@@ -471,9 +529,9 @@ if __name__ == "__main__":
     print(f"Profit Factor:   {metrics['profit_factor']:.2f}")
     print("=" * 50)
     
-    # ==========================================
+    # =============
     # LIVE SIGNAL
-    # ==========================================
+    # =============
     print("\n" + "=" * 50)
     print("CURRENT TRADING SIGNAL")
     print("=" * 50)
@@ -490,12 +548,21 @@ if __name__ == "__main__":
     
     predicted_change = (target_price - current_price) / current_price
     
+    # Use the dynamic ATR threshold for the signal check
+    current_atr = df_test_small['ATR'].iloc[-1]
+    current_rsi = df_test_small['RSI'].iloc[-1]
+    dynamic_threshold_pct = (current_atr / current_price) * ATR_MULTIPLIER
+    
     print(f"Current Price:   ${current_price:.2f}")
     print(f"Predicted Price: ${target_price:.2f}")
+    print(f"Required Move (ATR): {dynamic_threshold_pct * 100:.3f}%")
     print(f"Expected Change: {predicted_change * 100:.3f}%")
+    print(f"Current RSI:     {current_rsi:.1f}")
     
-    if abs(predicted_change) < CONFIDENCE_THRESHOLD:
-        signal = "WAIT - Low confidence"
+    if abs(predicted_change) < dynamic_threshold_pct:
+        signal = "WAIT - Move smaller than ATR Threshold"
+    elif RSI_DEAD_ZONE_LOW <= current_rsi <= RSI_DEAD_ZONE_HIGH:
+        signal = "WAIT - RSI in Dead Zone (No Trend)"
     elif predicted_change > 0:
         signal = f"BUY (SL: ${current_price * (1 - STOP_LOSS_PCT):.2f}, TP: ${current_price * (1 + TAKE_PROFIT_PCT):.2f})"
     else:
@@ -504,9 +571,9 @@ if __name__ == "__main__":
     print(f"\n>> SIGNAL: {signal}")
     print("=" * 50)
     
-    # ==========================================
+    # =============
     # VISUALIZATION
-    # ==========================================
+    # =============
     print("\nGenerating performance chart...")
     
     fig = make_subplots(
