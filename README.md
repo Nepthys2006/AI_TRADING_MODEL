@@ -9,6 +9,13 @@
 <br>
 <br>
 
+# if video did not show up
+ * go to this directory "images/TRADE_WEEKLY_WINRATE.mp4" and open it with any video player
+
+<br>
+<br>
+
+
 ## 📌 Overview
 This project implements an **improved dual-timeframe LSTM-based price prediction system for Gold (XAUUSD)**.
 It significantly enhances the original model by incorporating **technical indicators, efficient memory management, and a robust 2025 Out-of-Sample testing strategy**.
@@ -58,14 +65,14 @@ The graph below demonstrates the model's prediction capabilities against real ma
 ### Wealth Simulation (Paper Trading)
 A Monte Carlo simulation projecting the growth of **$200** initial capital based on the model's historical win rate and risk parameters.
 
-**2026 Projection:**
-*   **Projected Median:** $301.47 (Likely Outcome)
-*   **Optimistic (90%):** $372.55 (Possible Upside)
-*   **Pessimistic (10%):** $245.24 (Conservative Estimate)
 
 ![Paper Trade Simulation](images/PAPER_TRADE_OF_AIMODEL_200.png)
 
 ### Future Outlook (2026-2027)
+**2026 Projection:**
+*   **Projected Median:** $301.47 (Likely Outcome)
+*   **Optimistic (90%):** $372.55 (Possible Upside)
+*   **Pessimistic (10%):** $245.24 (Conservative Estimate)
 Projected trend analysis for XAU/USD for the upcoming years.
 ![Future Prediction 2026-2027](images/predictedXAU-USD_2026-2027.png)
 
