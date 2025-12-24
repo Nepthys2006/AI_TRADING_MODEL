@@ -9,6 +9,11 @@
 <br>
 <br>
 
+# if video did not apear go to the images file 
+
+<br>
+
+
 ## 📌 Overview
 This project implements an **improved dual-timeframe LSTM-based price prediction system for Gold (XAUUSD)**.
 It significantly enhances the original model by incorporating **technical indicators, efficient memory management, and a robust 2025 Out-of-Sample testing strategy**.
