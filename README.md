@@ -10,7 +10,7 @@
 <br>
 
 # if video did not apear go to the images file 
-
+* TRADE_WEEKLY_WINRATE.mp4 *
 <br>
 
 
