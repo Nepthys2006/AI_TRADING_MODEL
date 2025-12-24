@@ -9,10 +9,15 @@
 <br>
 <br>
 
+<<<<<<< HEAD
 # if video did not show up
  * go to this directory "images/TRADE_WEEKLY_WINRATE.mp4" and open it with any video player
 
 <br>
+=======
+# if video did not apear go to the images file 
+* TRADE_WEEKLY_WINRATE.mp4 *
+>>>>>>> 9642d9cfd39761e1ab30759388b908df32249ed5
 <br>
 
 
