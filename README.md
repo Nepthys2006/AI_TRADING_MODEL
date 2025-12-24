@@ -1,6 +1,13 @@
 # Gold Price Prediction V2 (Improved Dual-Timeframe LSTM)
 
 **Created by:** Daryl James Padogdog
+<br>
+<br>
+
+<video src="images/TRADE_WEEKLY_WINRATE.mp4" controls="controls" style="max-width: 100%;">
+</video>
+<br>
+<br>
 
 ## 📌 Overview
 This project implements an **improved dual-timeframe LSTM-based price prediction system for Gold (XAUUSD)**.
