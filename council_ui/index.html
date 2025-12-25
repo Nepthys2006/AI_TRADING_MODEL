@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trading Council | Forex Expert Collaboration</title>
+    <meta name="description" content="Elite AI trading council for forex analysis and strategy collaboration">
+    <link rel="stylesheet" href="/static/styles.css">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Orbitron:wght@400;600;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="20" cy="20" r="18" stroke="url(#gold-gradient)" stroke-width="2" />
+                        <path d="M12 20L18 14L24 18L28 12" stroke="url(#gold-gradient)" stroke-width="2"
+                            stroke-linecap="round" />
+                        <path d="M12 26L18 22L24 26L28 20" stroke="url(#green-gradient)" stroke-width="2"
+                            stroke-linecap="round" />
+                        <defs>
+                            <linearGradient id="gold-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style="stop-color:#FFD700" />
+                                <stop offset="100%" style="stop-color:#FFA500" />
+                            </linearGradient>
+                            <linearGradient id="green-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" style="stop-color:#00FF88" />
+                                <stop offset="100%" style="stop-color:#00D4AA" />
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <div class="logo-text">
+                    <h1>AI Trading Council</h1>
+                    <span class="subtitle">Senior Forex Expert Collaboration</span>
+                </div>
+            </div>
+            <div class="header-status">
+                <div class="status-indicator online"></div>
+                <span id="connection-status">Connecting...</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Left Panel: Model Status -->
+            <aside class="models-panel">
+                <div class="panel-header">
+                    <h2>Council Members</h2>
+                    <button class="refresh-btn" id="refresh-btn" title="Refresh Status">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 4v6h6M23 20v-6h-6" />
+                            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="models-list" id="models-list">
+                    <!-- Models will be dynamically inserted here -->
+                    <div class="loading-models">
+                        <div class="spinner"></div>
+                        <span>Loading models...</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Center: Discussion Area -->
+            <section class="discussion-panel">
+                <div class="panel-header">
+                    <h2>Council Discussion</h2>
+                    <div class="phase-indicator" id="phase-indicator">
+                        <span class="phase" data-phase="1">Responses</span>
+                        <span class="phase" data-phase="2">Ranking</span>
+                        <span class="phase" data-phase="3">Synthesis</span>
+                    </div>
+                </div>
+
+                <!-- Question Input -->
+                <div class="question-input-container">
+                    <div class="input-wrapper">
+                        <input type="text" id="question-input"
+                            placeholder="Ask the council a forex trading question..." />
+                        <button class="submit-btn" id="submit-btn">
+                            <span>Convene Council</span>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="conversation-controls">
+                        <div class="example-questions">
+                            <span>Try:</span>
+                            <button class="example-btn"
+                                data-question="What's your outlook on EUR/USD for the next week?">EUR/USD
+                                outlook</button>
+                            <button class="example-btn"
+                                data-question="What are the key support and resistance levels for Gold (XAU/USD)?">Gold
+                                levels</button>
+                            <button class="example-btn"
+                                data-question="How should I manage risk during high volatility news events?">Risk
+                                management</button>
+                        </div>
+                        <div class="session-controls">
+                            <span class="session-count" id="session-count">Session: 0</span>
+                            <button class="new-conversation-btn" id="new-conversation-btn"
+                                title="Clear history and start fresh">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path
+                                        d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                </svg>
+                                <span>Start New Conversation</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Discussion Thread -->
+                <div class="discussion-thread" id="discussion-thread">
+                    <div class="welcome-message">
+                        <div class="welcome-icon">🎯</div>
+                        <h3>Welcome to the AI Trading Council</h3>
+                        <p>Ask any forex trading question and watch as 11 AI experts, each a senior specialist in their
+                            field, collaborate to provide you with comprehensive insights.</p>
+                        <div class="welcome-features">
+                            <div class="feature">
+                                <span class="feature-icon">💬</span>
+                                <span>Expert Responses</span>
+                            </div>
+                            <div class="feature">
+                                <span class="feature-icon">⭐</span>
+                                <span>Peer Ranking</span>
+                            </div>
+                            <div class="feature">
+                                <span class="feature-icon">🤝</span>
+                                <span>Collaborative Synthesis</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: Rankings & Synthesis -->
+            <aside class="results-panel">
+                <div class="rankings-section">
+                    <div class="panel-header">
+                        <h2>Council Rankings</h2>
+                    </div>
+                    <div class="rankings-list" id="rankings-list">
+                        <div class="empty-state">
+                            <span class="empty-icon">🏆</span>
+                            <p>Rankings will appear after the council evaluates responses</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="synthesis-section">
+                    <div class="panel-header">
+                        <h2>Collaborative Synthesis</h2>
+                    </div>
+                    <div class="synthesis-content" id="synthesis-content">
+                        <div class="empty-state">
+                            <span class="empty-icon">🤝</span>
+                            <p>The council's synthesized recommendation will appear here</p>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

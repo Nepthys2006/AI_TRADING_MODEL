@@ -1,10 +1,12 @@
-# ================
-# (INFO) HYBRID DUAL-TIMEFRAME DEMO
-# ================
-# Uses the same logic as Trading_AI_model.ipynb:
-# - Big Brother: Determines overall market trend (BULLISH/BEARISH)
-# - Little Brother: Confirms precise trade entries
-# - Only trades when BOTH timeframes agree
+# ===========================================
+# HYBRID DUAL-TIMEFRAME DEMO v2.0
+# ===========================================
+# AI Council Upgrade Implementation:
+# - 3-class classification (UP/FLAT/DOWN) interpretation
+# - Volatility-adaptive triggers (k×ATR thresholds)
+# - Session-aware confidence scoring
+# - Full risk shell integration (ATR SL/TP, Kelly sizing)
+# - Monte-Carlo validation
 # ===========================================
 
 import numpy as np
@@ -15,434 +17,598 @@ warnings.filterwarnings('ignore')
 
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# ================
-# (INFO) CONFIGURATION
-# ================
-BIG_BROTHER_MODEL = 'big_brother_v2.keras'
-LITTLE_BROTHER_MODEL = 'little_brother_v2.keras'
-SCALER_SMALL = 'scaler_small.pkl'
-CLOSE_SCALER = 'close_scaler.pkl'
+# Import custom modules
+import sys
+sys.path.insert(0, '.')
+from utils.indicators import (
+    add_all_indicators,
+    FEATURE_COLS_ADVANCED
+)
+from utils.risk_shell import RiskShell, RiskConfig, monte_carlo_simulation
+from utils.metrics import comprehensive_metrics, print_metrics_report, calculate_sortino_ratio
 
-TEST_5M = 'TEST_5m.csv'
-TEST_1H = 'TEST_1h.csv'
+# ===========================================
+# CONFIGURATION
+# ===========================================
+BIG_BROTHER_MODEL = 'big_brother_v2_classification.keras'
+LITTLE_BROTHER_MODEL = 'little_brother_v2_classification.keras'
+SCALER_BIG = 'scaler_big_brother.pkl'
+SCALER_LITTLE = 'scaler_little_brother.pkl'
+
+TEST_5M = 'DATA_SET/TEST_5m.csv'
+TEST_1H = 'DATA_SET/TEST_1h.csv'
 
 LOOKBACK_BIG = 168   # 1 week of hourly data
 LOOKBACK_SMALL = 48  # 4 hours of 5-min data
 
-FEATURE_COLS = [
-    'Open', 'High', 'Low', 'Close', 'Volume',
-    'Returns', 'EMA_20', 'EMA_50', 'EMA_Diff',
-    'RSI', 'MACD', 'MACD_Signal', 'MACD_Hist',
-    'BB_Width', 'BB_Position', 'ATR', 'Volatility'
-]
+FEATURE_COLS = FEATURE_COLS_ADVANCED
+NUM_CLASSES = 3  # DOWN=0, FLAT=1, UP=2
 
-# ================
-# (INFO) TECHNICAL INDICATORS
-# ================
-def calculate_rsi(prices, period=14):
-    delta = prices.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
+# Risk configuration
+RISK_CONFIG = RiskConfig(
+    equity_risk=0.01,
+    sl_atr_mult=1.5,
+    tp_atr_mult=2.5,
+    max_hold_bars_5m=576,
+    kelly_divisor=20,
+    max_consecutive_losses=3,
+    min_confidence=0.55,
+    min_adx=25.0,
+    atr_trigger_mult=0.55
+)
 
-def calculate_macd(prices, fast=12, slow=26, signal=9):
-    ema_fast = prices.ewm(span=fast, adjust=False).mean()
-    ema_slow = prices.ewm(span=slow, adjust=False).mean()
-    macd = ema_fast - ema_slow
-    signal_line = macd.ewm(span=signal, adjust=False).mean()
-    histogram = macd - signal_line
-    return macd, signal_line, histogram
-
-def calculate_bollinger_bands(prices, period=20, std_dev=2):
-    middle = prices.rolling(window=period).mean()
-    std = prices.rolling(window=period).std()
-    upper = middle + (std * std_dev)
-    lower = middle - (std * std_dev)
-    return upper, middle, lower
-
-def calculate_atr(high, low, close, period=14):
-    tr1 = high - low
-    tr2 = abs(high - close.shift())
-    tr3 = abs(low - close.shift())
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(window=period).mean()
-
-def add_technical_indicators(df):
-    df['Returns'] = df['Close'].pct_change()
-    df['EMA_20'] = df['Close'].ewm(span=20, adjust=False).mean()
-    df['EMA_50'] = df['Close'].ewm(span=50, adjust=False).mean()
-    df['EMA_Diff'] = df['EMA_20'] - df['EMA_50']
-    df['RSI'] = calculate_rsi(df['Close'], 14)
-    df['MACD'], df['MACD_Signal'], df['MACD_Hist'] = calculate_macd(df['Close'])
-    df['BB_Upper'], df['BB_Middle'], df['BB_Lower'] = calculate_bollinger_bands(df['Close'])
-    df['BB_Width'] = (df['BB_Upper'] - df['BB_Lower']) / df['BB_Middle']
-    df['BB_Position'] = (df['Close'] - df['BB_Lower']) / (df['BB_Upper'] - df['BB_Lower'])
-    df['ATR'] = calculate_atr(df['High'], df['Low'], df['Close'])
-    df['Volatility'] = df['Returns'].rolling(window=20).std()
-    return df
-
+# ===========================================
+# DATA LOADING
+# ===========================================
 def load_and_preprocess(filepath):
+    """Load data and add all technical indicators."""
     print(f"Loading {filepath}...")
     df = pd.read_csv(filepath, sep=';')
     df['Date'] = pd.to_datetime(df['Date'], format='%Y.%m.%d %H:%M')
     df = df.sort_values('Date').reset_index(drop=True)
-    df = add_technical_indicators(df)
+    df = add_all_indicators(df, include_advanced=True)
     df = df.dropna().reset_index(drop=True)
     float_cols = df.select_dtypes(include=['float64']).columns
     df[float_cols] = df[float_cols].astype('float32')
     print(f"Loaded {len(df)} rows")
     return df
 
-# ================
-# (INFO) HYBRID BACKTEST LOGIC
-# ================
-def hybrid_backtest(df_5m, little_predictions, df_1h, big_predictions, lookback_5m, lookback_1h, initial_capital=200.0):
+
+def interpret_softmax(probs, class_names=['DOWN', 'FLAT', 'UP']):
     """
-    Backtest with PHASE 2 Optimizations & Paper Trading:
-    1. Dynamic Bias Correction.
-    2. Stricter Threshold & EMA Filter.
-    3. Paper Trading ($200 Start).
+    Interpret softmax probabilities.
+    
+    Returns:
+        pred_class: 0, 1, or 2
+        direction: 'DOWN', 'FLAT', or 'UP'
+        confidence: max probability
     """
+    pred_class = np.argmax(probs)
+    confidence = probs[pred_class]
+    direction = class_names[pred_class]
+    return pred_class, direction, confidence
+
+
+# ===========================================
+# CLASSIFICATION-BASED BACKTEST
+# ===========================================
+def classification_backtest(
+    df_5m,
+    little_probs,  # (N, 3) softmax probabilities
+    df_1h,
+    big_probs,     # (N, 3) softmax probabilities
+    lookback_5m,
+    lookback_1h,
+    risk_config,
+    initial_capital=200.0
+):
+    """
+    Backtest with v2.0 classification models and risk shell.
+    """
+    # Initialize risk shell
+    risk_shell = RiskShell(config=risk_config, initial_equity=initial_capital)
+    
     results = {
         'total_signals': 0,
-        'confirmed_trades': 0,
-        'wins': 0,
-        'losses': 0,
-        'buy_signals': 0,
-        'sell_signals': 0,
-        'wait_signals': 0,
+        'entries_attempted': 0,
+        'trades_executed': 0,
         'filtered_signals': 0,
         'initial_balance': initial_capital,
-        'final_balance': initial_capital,
-        'net_profit': 0.0
     }
     
-    trades = []
-    equity_curve = [initial_capital]
     signals_log = []
+    equity_curve = [initial_capital]
+    trade_returns_pct = []
     
-    # --- Bias Correction Setup ---
-    bias_window = [] 
-    BIAS_WINDOW_SIZE = 50 
+    # Align data
+    df_5m_subset = df_5m.iloc[lookback_5m-1:lookback_5m-1+len(little_probs)].copy()
+    df_1h_subset = df_1h.iloc[lookback_1h-1:lookback_1h-1+len(big_probs)].copy()
     
-    # --- Filters (PHASE 2) ---
-    RSI_BUY_MAX = 70
-    RSI_SELL_MIN = 30
-    MIN_THRESHOLD = 0.0015
-    
-    # Align Data
-    df_5m_subset = df_5m.iloc[lookback_5m-1:lookback_5m-1+len(little_predictions)].copy()
-    df_5m_subset['Predicted_Raw'] = little_predictions
-    
-    df_1h_subset = df_1h.iloc[lookback_1h-1:lookback_1h-1+len(big_predictions)].copy()
-    df_1h_subset['Predicted_Raw'] = big_predictions
-    
-    # 1H Mapping (Added EMAs for Trend Filter)
+    # 1H Mapping (hourly trend data)
     df_1h_subset['Hour'] = df_1h_subset['Date'].dt.floor('H')
-    hourly_trend = df_1h_subset.set_index('Hour')[
-        ['Close', 'Predicted_Raw', 'EMA_20', 'EMA_50']
-    ].to_dict('index')
+    hourly_data = df_1h_subset.set_index('Hour').to_dict('index')
     
-    current_balance = initial_capital
+    # Create hourly probability mapping
+    hourly_probs = {}
+    for i, row in df_1h_subset.iterrows():
+        hour_key = row['Hour']
+        if i - (lookback_1h - 1) < len(big_probs):
+            prob_idx = i - (lookback_1h - 1)
+            if prob_idx >= 0:
+                hourly_probs[hour_key] = big_probs[prob_idx]
     
-    # --- MAIN LOOP ---
+    # Main loop
     for i in range(len(df_5m_subset) - 1):
         row = df_5m_subset.iloc[i]
+        next_row = df_5m_subset.iloc[i + 1]
         current_price = row['Close']
-        actual_next = df_5m_subset.iloc[i + 1]['Close']
+        current_high = row['High']
+        current_low = row['Low']
+        atr = row['ATR']
+        adx = row['ADX']
+        rsi = row['RSI']
+        pattern_strength = row.get('pattern_strength', 0)
+        current_time = row['Date']
         
-        # 1. Update Bias
-        raw_pred_5m = row['Predicted_Raw']
-        current_bias = current_price - raw_pred_5m
-        bias_window.append(current_bias)
-        if len(bias_window) > BIAS_WINDOW_SIZE:
-            bias_window.pop(0)
-        avg_bias = sum(bias_window) / len(bias_window)
+        # Get 5M prediction
+        if i < len(little_probs):
+            probs_5m = little_probs[i]
+        else:
+            continue
         
-        pred_5m_corrected = raw_pred_5m + avg_bias
+        pred_5m_class, pred_5m_dir, conf_5m = interpret_softmax(probs_5m)
         
-        # 2. Big Brother Trend (STRICTER EMA FILTER)
+        # Get 1H trend prediction
         hour_key = row['Date'].floor('H')
-        trend = "NEUTRAL"
+        if hour_key in hourly_probs:
+            probs_1h = hourly_probs[hour_key]
+            pred_1h_class, pred_1h_dir, conf_1h = interpret_softmax(probs_1h)
+        else:
+            pred_1h_class, pred_1h_dir, conf_1h = 1, 'FLAT', 0.33
         
-        if hour_key in hourly_trend:
-            h_data = hourly_trend[hour_key]
-            pred_bullish = (h_data['Predicted_Raw'] - h_data['Close']) > -avg_bias
-            ema_bullish = (h_data['Close'] > h_data['EMA_50']) and (h_data['EMA_20'] > h_data['EMA_50'])
-            ema_bearish = (h_data['Close'] < h_data['EMA_50']) and (h_data['EMA_20'] < h_data['EMA_50'])
-            
-            if pred_bullish and ema_bullish:
-                trend = "BULLISH"
-            elif not pred_bullish and ema_bearish:
-                trend = "BEARISH"
-                
-        # 3. Little Brother Entry
-        pred_change = (pred_5m_corrected - current_price) / current_price
-        
-        entry_signal = "WAIT"
-        if pred_change > MIN_THRESHOLD:
-            entry_signal = "BUY"
-        elif pred_change < -MIN_THRESHOLD:
-            entry_signal = "SELL"
-            
-        # 4. RSI Filter
-        if entry_signal == "BUY" and row['RSI'] > RSI_BUY_MAX:
-            entry_signal = "WAIT"
-            results['filtered_signals'] += 1
-        if entry_signal == "SELL" and row['RSI'] < RSI_SELL_MIN:
-            entry_signal = "WAIT"
-            results['filtered_signals'] += 1
-            
-        # === FINAL DECISION ===
         results['total_signals'] += 1
-        final_signal = "WAIT"
-        trade_return = 0.0
         
-        if trend == "BULLISH" and entry_signal == "BUY":
-            final_signal = "BUY NOW"
-            results['buy_signals'] += 1
-            results['confirmed_trades'] += 1
+        # === CHECK EXIT CONDITIONS ===
+        if risk_shell.state.current_position is not None:
+            should_exit, exit_reason, pnl = risk_shell.check_exit_conditions(
+                current_price, current_high, current_low
+            )
             
-            trade_return = (actual_next - current_price) / current_price
-            trades.append(trade_return)
-            
-            if actual_next > current_price:
-                results['wins'] += 1
-            else:
-                results['losses'] += 1
+            if should_exit:
+                trade_result = risk_shell.close_position(current_price, exit_reason)
+                if trade_result.get('pnl_pct'):
+                    trade_returns_pct.append(trade_result['pnl_pct'])
+                equity_curve.append(risk_shell.state.equity)
                 
-        elif trend == "BEARISH" and entry_signal == "SELL":
-            final_signal = "SELL NOW"
-            results['sell_signals'] += 1
-            results['confirmed_trades'] += 1
-            
-            trade_return = (current_price - actual_next) / current_price
-            trades.append(trade_return)
-            
-            if actual_next < current_price:
-                results['wins'] += 1
-            else:
-                results['losses'] += 1
+                signals_log.append({
+                    'date': current_time,
+                    'action': 'EXIT',
+                    'reason': exit_reason,
+                    'price': current_price,
+                    'pnl': pnl,
+                    'equity': risk_shell.state.equity
+                })
+                continue
         
-        elif entry_signal != "WAIT":
-            results['wait_signals'] += 1
-            
-        # Update Paper Trading Balance
-        if trade_return != 0:
-            current_balance = current_balance * (1 + trade_return)
+        # === CHECK ENTRY CONDITIONS ===
+        # Dual-timeframe agreement check
+        dual_agree = False
+        entry_direction = None
         
-        equity_curve.append(current_balance)
-            
+        if pred_1h_dir == 'UP' and pred_5m_dir == 'UP':
+            dual_agree = True
+            entry_direction = 'LONG'
+        elif pred_1h_dir == 'DOWN' and pred_5m_dir == 'DOWN':
+            dual_agree = True
+            entry_direction = 'SHORT'
+        
+        if not dual_agree:
+            results['filtered_signals'] += 1
+            signals_log.append({
+                'date': current_time,
+                'action': 'WAIT',
+                'reason': f'No agreement: 1H={pred_1h_dir}, 5M={pred_5m_dir}',
+                'price': current_price,
+                'conf_1h': conf_1h,
+                'conf_5m': conf_5m
+            })
+            continue
+        
+        results['entries_attempted'] += 1
+        
+        # Risk shell entry check
+        signal, confidence, reason = risk_shell.check_entry_conditions(
+            softmax_probs=probs_5m,
+            adx=adx,
+            rsi=rsi,
+            atr=atr,
+            current_price=current_price,
+            pattern_strength=int(pattern_strength) if pd.notna(pattern_strength) else 0
+        )
+        
+        if signal is None:
+            results['filtered_signals'] += 1
+            signals_log.append({
+                'date': current_time,
+                'action': 'FILTERED',
+                'reason': reason,
+                'price': current_price,
+                'conf': confidence
+            })
+            continue
+        
+        # Execute entry
+        entry_result = risk_shell.open_position(
+            signal=signal,
+            entry_price=current_price,
+            atr=atr,
+            entry_time=current_time
+        )
+        
+        results['trades_executed'] += 1
+        
         signals_log.append({
-            'date': row['Date'],
+            'date': current_time,
+            'action': 'ENTRY',
+            'direction': signal,
             'price': current_price,
-            'pred': pred_5m_corrected,
-            'trend': trend,
-            'final': final_signal
+            'sl': entry_result['stop_loss'],
+            'tp': entry_result['take_profit'],
+            'size': entry_result['position_size'],
+            'conf_1h': conf_1h,
+            'conf_5m': conf_5m
         })
-
-    # Metrics
-    results['final_balance'] = current_balance
-    results['net_profit'] = current_balance - initial_capital
+        
+        equity_curve.append(risk_shell.state.equity)
     
-    if results['confirmed_trades'] > 0:
-        results['win_rate'] = (results['wins'] / results['confirmed_trades']) * 100
-        returns_series = pd.Series(trades)
-        cumulative_returns = (1 + returns_series).cumprod()
-        results['total_return'] = (cumulative_returns.iloc[-1] - 1) * 100
-        results['sharpe_ratio'] = np.sqrt(252 * 288) * returns_series.mean() / returns_series.std() if returns_series.std() > 0 else 0
+    # Close any remaining position
+    if risk_shell.state.current_position is not None:
+        final_price = df_5m_subset.iloc[-1]['Close']
+        risk_shell.close_position(final_price, "End of backtest")
+    
+    # Get summary from risk shell
+    summary = risk_shell.get_summary()
+    
+    results.update({
+        'wins': summary['wins'],
+        'losses': summary['losses'],
+        'win_rate': summary['win_rate'],
+        'total_pnl': summary['total_pnl'],
+        'final_balance': risk_shell.state.equity,
+        'net_profit': risk_shell.state.equity - initial_capital,
+        'avg_pnl': summary.get('avg_pnl', 0),
+        'avg_bars_held': summary.get('avg_bars_held', 0),
+        'consecutive_losses': summary['consecutive_losses'],
+        'was_halted': summary['is_halted']
+    })
+    
+    # Calculate Sharpe ratio
+    if trade_returns_pct:
+        returns = np.array(trade_returns_pct)
+        if returns.std() > 0:
+            # Annualized Sharpe (assuming ~288 5-min bars per day)
+            sharpe = np.sqrt(252 * 288) * returns.mean() / returns.std()
+        else:
+            sharpe = 0
+        results['sharpe_ratio'] = sharpe
     else:
-        results['win_rate'] = 0
-        results['total_return'] = 0
         results['sharpe_ratio'] = 0
     
-    return results, trades, signals_log, avg_bias, equity_curve
+    return results, signals_log, equity_curve, trade_returns_pct, risk_shell
 
-# ================
-# (INFO) MAIN
-# ================
+
+# ===========================================
+# MAIN
+# ===========================================
 if __name__ == "__main__":
     print("=" * 60)
-    print("  HYBRID DUAL-TIMEFRAME DEMO (Phase 2 Optimized)")
-    print("  Stricter Filters | EMA Alignment | Bias Correction")
+    print("  HYBRID DUAL-TIMEFRAME DEMO v2.0")
+    print("  AI Council Classification + Risk Shell")
     print("=" * 60)
     
-    # ... (Model Loading Logic - Condensed for brevity, functionality maintained)
     # ===== LOAD MODELS =====
-    print("\n[1/5] Loading models...")
+    print("\n[1/6] Loading classification models...")
+    
     try:
-        big_model = load_model(BIG_BROTHER_MODEL)
-        print(f"  ✓ Big Brother (1H) loaded")
+        big_model = load_model(BIG_BROTHER_MODEL, compile=False)
+        big_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        print(f"  ✓ Big Brother (1H) loaded - Classification model")
     except Exception as e:
         print(f"  ✗ Big Brother not found: {e}")
+        print("    Run train_big_brother.py first!")
         big_model = None
     
     try:
-        little_model = load_model(LITTLE_BROTHER_MODEL)
-        print(f"  ✓ Little Brother (5M) loaded")
+        little_model = load_model(LITTLE_BROTHER_MODEL, compile=False)
+        little_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        print(f"  ✓ Little Brother (5M) loaded - Classification model")
     except Exception as e:
         print(f"  ✗ Little Brother not found: {e}")
+        print("    Run train_little_brother.py first!")
         little_model = None
     
     if not big_model or not little_model:
+        print("\n⚠️  Models not found. Please train first:")
+        print("   1. python train/train_big_brother.py")
+        print("   2. python train/train_little_brother.py")
         exit()
     
-    with open(SCALER_SMALL, 'rb') as f:
-        scaler = pickle.load(f)
-    with open(CLOSE_SCALER, 'rb') as f:
-        close_scaler = pickle.load(f)
-    print("  ✓ Scalers loaded")
+    # Load scalers
+    try:
+        with open(SCALER_BIG, 'rb') as f:
+            scaler_big = pickle.load(f)
+        with open(SCALER_LITTLE, 'rb') as f:
+            scaler_little = pickle.load(f)
+        print("  ✓ Scalers loaded")
+    except Exception as e:
+        print(f"  ✗ Scaler error: {e}")
+        exit()
     
     # ===== LOAD DATA =====
-    print("\n[2/5] Loading 2025 test data...")
+    print("\n[2/6] Loading test data...")
     df_5m = load_and_preprocess(TEST_5M)
-    try:
-        df_1h = load_and_preprocess(TEST_1H)
-    except:
-        print(" Using resampled 1H data...")
-        pass 
-
+    df_1h = load_and_preprocess(TEST_1H)
+    
     # ===== RUN PREDICTIONS =====
-    print("\n[3/5] Running predictions...")
+    print("\n[3/6] Running classification predictions...")
     
-    # Little Brother (5M)
-    print("  Running Little Brother (5M)...")
+    # Scale data
     df_5m_scaled = df_5m.copy()
-    df_5m_scaled[FEATURE_COLS] = scaler.transform(df_5m[FEATURE_COLS])
+    df_5m_scaled[FEATURE_COLS] = scaler_little.transform(df_5m[FEATURE_COLS])
     
-    predict_5m = tf.keras.utils.timeseries_dataset_from_array(
-        data=df_5m_scaled[FEATURE_COLS].values, targets=None,
-        sequence_length=LOOKBACK_SMALL, batch_size=256, shuffle=False
-    )
-    pred_5m_scaled = little_model.predict(predict_5m, verbose=0)
-    little_predictions = close_scaler.inverse_transform(pred_5m_scaled).flatten()
-    print(f"  ✓ {len(little_predictions)} predictions")
-    
-    # Big Brother (1H)
-    print("  Running Big Brother (1H)...")
     df_1h_scaled = df_1h.copy()
-    df_1h_scaled[FEATURE_COLS] = scaler.transform(df_1h[FEATURE_COLS])
+    df_1h_scaled[FEATURE_COLS] = scaler_big.transform(df_1h[FEATURE_COLS])
     
-    predict_1h = tf.keras.utils.timeseries_dataset_from_array(
-        data=df_1h_scaled[FEATURE_COLS].values, targets=None,
-        sequence_length=LOOKBACK_BIG, batch_size=64, shuffle=False
+    # Little Brother (5M) predictions
+    print("  Running Little Brother (5M)...")
+    predict_5m = tf.keras.utils.timeseries_dataset_from_array(
+        data=df_5m_scaled[FEATURE_COLS].values,
+        targets=None,
+        sequence_length=LOOKBACK_SMALL,
+        batch_size=256,
+        shuffle=False
     )
-    pred_1h_scaled = big_model.predict(predict_1h, verbose=0)
-    big_predictions = close_scaler.inverse_transform(pred_1h_scaled).flatten()
-    print(f"  ✓ {len(big_predictions)} predictions")
+    little_probs = little_model.predict(predict_5m, verbose=0)
+    print(f"  ✓ {len(little_probs)} classifications (5M)")
     
-    # ===== HYBRID BACKTEST =====
-    print("\n[4/5] Running Phase 2 Optimization & Simulation...")
+    # Big Brother (1H) predictions
+    print("  Running Big Brother (1H)...")
+    predict_1h = tf.keras.utils.timeseries_dataset_from_array(
+        data=df_1h_scaled[FEATURE_COLS].values,
+        targets=None,
+        sequence_length=LOOKBACK_BIG,
+        batch_size=64,
+        shuffle=False
+    )
+    big_probs = big_model.predict(predict_1h, verbose=0)
+    print(f"  ✓ {len(big_probs)} classifications (1H)")
     
-    metrics, trades, signals, final_bias, equity_curve = hybrid_backtest(
-        df_5m, little_predictions,
-        df_1h, big_predictions,
+    # ===== CLASSIFICATION BACKTEST =====
+    print("\n[4/6] Running v2.0 Backtest with Risk Shell...")
+    
+    results, signals, equity_curve, trade_returns, risk_shell = classification_backtest(
+        df_5m, little_probs,
+        df_1h, big_probs,
         LOOKBACK_SMALL, LOOKBACK_BIG,
+        RISK_CONFIG,
         initial_capital=200.0
     )
     
+    # ===== MONTE-CARLO SIMULATION =====
+    print("\n[5/6] Running Monte-Carlo Simulation (5k paths)...")
+    
+    if trade_returns:
+        mc_results = monte_carlo_simulation(
+            trade_returns,
+            n_simulations=5000,
+            n_trades=100,
+            initial_equity=200.0
+        )
+    else:
+        mc_results = {'error': 'No trades for simulation'}
+    
     # ===== DISPLAY RESULTS =====
     print("\n" + "=" * 60)
-    print("  HYBRID BACKTEST RESULTS (OPTIMIZED)")
+    print("  v2.0 CLASSIFICATION BACKTEST RESULTS")
+    print("  (AI Council: Transaction Costs Applied)")
     print("=" * 60)
     
     print(f"\n  📊 Signal Analysis:")
-    print(f"     Total Candles:      {metrics['total_signals']}")
-    print(f"     Confirmed Trades:   {metrics['confirmed_trades']} (Reduced Noise)")
-    print(f"     Filtered Signals:   {metrics['filtered_signals']}")
+    print(f"     Total Candles:       {results['total_signals']}")
+    print(f"     Entry Attempts:      {results['entries_attempted']}")
+    print(f"     Trades Executed:     {results['trades_executed']}")
+    print(f"     Filtered Signals:    {results['filtered_signals']}")
     
     print(f"\n  💰 Trading Performance:")
-    print(f"     BUY Trades:         {metrics['buy_signals']}")
-    print(f"     SELL Trades:        {metrics['sell_signals']}")
-    print(f"     Wins:               {metrics['wins']}")
-    print(f"     Losses:             {metrics['losses']}")
-    print(f"     Win Rate:           {metrics['win_rate']:.2f}%")
-    print(f"     Total Return:       {metrics['total_return']:.2f}%")
+    print(f"     Wins:                {results['wins']}")
+    print(f"     Losses:              {results['losses']}")
+    print(f"     Win Rate:            {results['win_rate']:.2f}%")
+    print(f"     Sharpe Ratio:        {results['sharpe_ratio']:.2f}")
+    
+    # Calculate Sortino ratio
+    if trade_returns:
+        returns_arr = np.array(trade_returns) / 100
+        sortino = calculate_sortino_ratio(returns_arr)
+        print(f"     Sortino Ratio:       {sortino:.2f}")
+    
+    print(f"     Avg Bars Held:       {results['avg_bars_held']:.1f}")
     
     print(f"\n  💵 Paper Trade Simulation ($200 Start):")
-    print(f"     Initial Balance:    ${metrics['initial_balance']:.2f}")
-    print(f"     Final Balance:      ${metrics['final_balance']:.2f}")
-    profit_sign = "+" if metrics['net_profit'] >= 0 else "-"
-    print(f"     Net Profit:         {profit_sign}${abs(metrics['net_profit']):.2f}")
-    print("=" * 60)
+    print(f"     Initial Balance:     ${results['initial_balance']:.2f}")
+    print(f"     Final Balance:       ${results['final_balance']:.2f}")
+    profit_sign = "+" if results['net_profit'] >= 0 else "-"
+    print(f"     Net Profit:          {profit_sign}${abs(results['net_profit']):.2f}")
+    
+    # Transaction costs summary
+    total_costs = risk_shell.state.total_costs_incurred
+    if total_costs > 0:
+        print(f"\n  💸 AI Council Transaction Costs (0.4 + 0.6 pip):")
+        print(f"     Total Costs Paid:    ${total_costs:.2f}")
+        cost_pct = (total_costs / results['initial_balance']) * 100
+        print(f"     Costs as % Capital:  {cost_pct:.1f}%")
+    
+    print(f"\n  ⚠️  Risk Shell Status:")
+    print(f"     Consecutive Losses:  {results['consecutive_losses']}")
+    print(f"     Was Halted:          {'Yes' if results['was_halted'] else 'No'}")
+    
+    if 'error' not in mc_results:
+        print(f"\n  🎲 Monte-Carlo Simulation ({mc_results['n_simulations']} paths, {mc_results['n_trades']} trades):")
+        print(f"     Median Equity:       ${mc_results['median_equity']:.2f}")
+        print(f"     5th Percentile:      ${mc_results['percentile_5']:.2f}")
+        print(f"     95th Percentile:     ${mc_results['percentile_95']:.2f}")
+        print(f"     Prob. of Profit:     {mc_results['prob_profit']:.1f}%")
+        print(f"     Prob. of 2x:         {mc_results['prob_double']:.1f}%")
+        print(f"     Median Max DD:       {mc_results['median_max_drawdown']:.1f}%")
     
     print("=" * 60)
-    print("\n" + "=" * 60)
-    print("  CURRENT TRADING SIGNAL (Bias Corrected)")
-    print("=" * 60)
-    current_price = df_5m['Close'].iloc[-1]
     
-    # 5M Prediction logic...
-    latest_5m = df_5m_scaled.iloc[-LOOKBACK_SMALL:][FEATURE_COLS].values[None, ...]
-    pred_5m_raw = close_scaler.inverse_transform(little_model.predict(latest_5m, verbose=0))[0][0]
-    target_5m_corrected = pred_5m_raw + final_bias
+    # ===== AI COUNCIL TARGET CHECKS =====
+    print("\n  🎯 AI Council Target Checks:")
+    sharpe_pass = results['sharpe_ratio'] >= 1.0
+    edge_pass = (results['net_profit'] / results['initial_balance']) * 100 >= 5.0
+    print(f"     Sharpe > 1.0:        {'✅ PASS' if sharpe_pass else '❌ FAIL'} ({results['sharpe_ratio']:.2f})")
+    print(f"     Net Edge > 5%:       {'✅ PASS' if edge_pass else '❌ FAIL'} ({(results['net_profit']/results['initial_balance'])*100:.1f}%)")
     
-    # 1H Prediction logic...
-    latest_1h = df_1h_scaled.iloc[-LOOKBACK_BIG:][FEATURE_COLS].values[None, ...]
-    pred_1h_raw = close_scaler.inverse_transform(big_model.predict(latest_1h, verbose=0))[0][0]
-    current_price_1h = df_1h['Close'].iloc[-1]
-    ema_20_1h = df_1h['EMA_20'].iloc[-1]
-    ema_50_1h = df_1h['EMA_50'].iloc[-1]
-    
-    ema_bullish = (current_price_1h > ema_50_1h) and (ema_20_1h > ema_50_1h)
-    ema_bearish = (current_price_1h < ema_50_1h) and (ema_20_1h < ema_50_1h)
-    pred_bullish_1h = (pred_1h_raw + final_bias) > current_price_1h
-    
-    if pred_bullish_1h and ema_bullish:
-        trend = "BULLISH (Strong Pattern)"
-        trend_icon = "🟢"
-    elif not pred_bullish_1h and ema_bearish:
-        trend = "BEARISH (Strong Pattern)"
-        trend_icon = "🔴"
+    # ===== CHECK SUCCESS CRITERIA =====
+    if results['win_rate'] >= 60 and results['sharpe_ratio'] >= 1.5:
+        print("\n✅ SUCCESS: Win Rate ≥60% and Sharpe ≥1.5!")
+        print("   Ready to promote to micro-live trading.")
+    elif results['win_rate'] >= 60 and results['sharpe_ratio'] >= 1.0:
+        print(f"\n⚠️  Win Rate OK ({results['win_rate']:.1f}%), Sharpe OK ({results['sharpe_ratio']:.2f})")
+        print("   Meets AI Council baseline. Consider more optimization.")
+    elif results['win_rate'] >= 60:
+        print(f"\n⚠️  Win Rate OK ({results['win_rate']:.1f}%), but Sharpe {results['sharpe_ratio']:.2f} < 1.0")
+        print("   Consider: tighter risk controls, better entry timing")
     else:
-        trend = "NEUTRAL (EMA Mismatch)"
-        trend_icon = "⚪"
-        
-    print(f"\n  [Big Brother] 1H Structure: {trend_icon} {trend}")
-    print(f"     Price: ${current_price_1h:.2f} | EMA50: ${ema_50_1h:.2f}")
+        print(f"\n⚠️  Win Rate {results['win_rate']:.1f}% below 60% target.")
+        print("   Consider: adjusting confidence thresholds, more training data")
     
-    move_pct = (target_5m_corrected - current_price) / current_price
-    min_thresh = 0.0015
-    if move_pct > min_thresh: entry = "BUY"
-    elif move_pct < -min_thresh: entry = "SELL"
-    else: entry = "WAIT (Weak Move)"
-        
-    print(f"\n  [Little Brother] 5M Signal: {entry}")
-    print(f"     Current: ${current_price:.2f}")
-    print(f"     Target:  ${target_5m_corrected:.2f}")
-    
-    print(f"\n  {'─' * 40}")
-    if "BULLISH" in trend and entry == "BUY": final_sig = "✅ BUY NOW"
-    elif "BEARISH" in trend and entry == "SELL": final_sig = "✅ SELL NOW"
-    else: final_sig = "⏸️ WAIT / FILTERED"
-    print(f"  >> FINAL SIGNAL: {final_sig}")
+    # ===== CURRENT SIGNAL =====
+    print("\n" + "=" * 60)
+    print("  CURRENT TRADING SIGNAL")
     print("=" * 60)
     
-    print("\n  📊 Charts displayed above")
+    current_price = df_5m['Close'].iloc[-1]
+    current_atr = df_5m['ATR'].iloc[-1]
+    current_adx = df_5m['ADX'].iloc[-1]
+    current_rsi = df_5m['RSI'].iloc[-1]
     
-    # Update Fig 1
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
-                       subplot_titles=(f'Hybrid Performance ({metrics["win_rate"]:.1f}%)', 
-                                     f'Account Balance ($200 Start) -> ${metrics["final_balance"]:.2f}', 
-                                     'Signals'))
+    # Get latest predictions
+    latest_5m_probs = little_probs[-1]
+    latest_1h_probs = big_probs[-1]
     
-    dates = df_5m['Date'].iloc[LOOKBACK_SMALL-1:LOOKBACK_SMALL-1+len(little_predictions)]
-    real = df_5m['Close'].iloc[LOOKBACK_SMALL-1:LOOKBACK_SMALL-1+len(little_predictions)]
+    _, dir_5m, conf_5m = interpret_softmax(latest_5m_probs)
+    _, dir_1h, conf_1h = interpret_softmax(latest_1h_probs)
     
-    fig.add_trace(go.Scatter(x=dates, y=real, mode='lines', name='Price', line=dict(color='#00FF00')), row=1, col=1)
+    print(f"\n  [Big Brother] 1H Classification:")
+    print(f"     Direction:   {dir_1h}")
+    print(f"     Confidence:  {conf_1h*100:.1f}%")
+    print(f"     Probs:       DOWN={latest_1h_probs[0]*100:.1f}% | FLAT={latest_1h_probs[1]*100:.1f}% | UP={latest_1h_probs[2]*100:.1f}%")
     
-    # Plot equity curve against trade count
+    print(f"\n  [Little Brother] 5M Classification:")
+    print(f"     Direction:   {dir_5m}")
+    print(f"     Confidence:  {conf_5m*100:.1f}%")
+    print(f"     Probs:       DOWN={latest_5m_probs[0]*100:.1f}% | FLAT={latest_5m_probs[1]*100:.1f}% | UP={latest_5m_probs[2]*100:.1f}%")
     
-    fig.add_trace(go.Scatter(x=list(range(len(equity_curve))), y=equity_curve, 
-                             mode='lines', name='Balance ($)', 
-                             line=dict(color='#00BFFF', width=2), fill='tozeroy'), row=2, col=1)
-        
-    fig.update_layout(template='plotly_dark', height=900, title='Phase 2 Results + Paper Trade Simulation')
+    print(f"\n  [Market State]:")
+    print(f"     Price:       ${current_price:.2f}")
+    print(f"     ATR:         ${current_atr:.2f}")
+    print(f"     ADX:         {current_adx:.1f} {'(Trending)' if current_adx > 25 else '(Ranging)'}")
+    print(f"     RSI:         {current_rsi:.1f}")
+    
+    # Final signal
+    print(f"\n  {'─' * 40}")
+    if dir_1h == dir_5m and dir_1h != 'FLAT':
+        if conf_5m >= 0.55 and current_adx > 25:
+            signal = '✅ ' + ('LONG' if dir_1h == 'UP' else 'SHORT') + ' NOW'
+            sl, tp = risk_shell.calculate_sl_tp(current_price, current_atr, 'LONG' if dir_1h == 'UP' else 'SHORT')
+            print(f"  >> FINAL SIGNAL: {signal}")
+            print(f"     Stop-Loss:   ${sl:.2f}")
+            print(f"     Take-Profit: ${tp:.2f}")
+        else:
+            print(f"  >> FINAL SIGNAL: ⚠️ WAIT (Low confidence or ranging)")
+    else:
+        print(f"  >> FINAL SIGNAL: ⏸️ WAIT (No dual-timeframe agreement)")
+    
+    print("=" * 60)
+    
+    # ===== VISUALIZATION =====
+    print("\n[6/6] Generating charts...")
+    
+    fig = make_subplots(
+        rows=3, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        subplot_titles=(
+            f'Classification Performance (Win Rate: {results["win_rate"]:.1f}%)',
+            f'Equity Curve ($200 → ${results["final_balance"]:.2f})',
+            'Classification Probabilities (5M)'
+        )
+    )
+    
+    # Row 1: Price with trade signals
+    dates = df_5m['Date'].iloc[LOOKBACK_SMALL-1:LOOKBACK_SMALL-1+len(little_probs)]
+    prices = df_5m['Close'].iloc[LOOKBACK_SMALL-1:LOOKBACK_SMALL-1+len(little_probs)]
+    
+    fig.add_trace(
+        go.Scatter(x=dates, y=prices, mode='lines', name='Price', line=dict(color='#00FF00')),
+        row=1, col=1
+    )
+    
+    # Add entry/exit markers from signals
+    entries = [s for s in signals if s['action'] == 'ENTRY']
+    exits = [s for s in signals if s['action'] == 'EXIT']
+    
+    if entries:
+        entry_dates = [e['date'] for e in entries]
+        entry_prices = [e['price'] for e in entries]
+        entry_colors = ['green' if e['direction'] == 'LONG' else 'red' for e in entries]
+        fig.add_trace(
+            go.Scatter(
+                x=entry_dates, y=entry_prices,
+                mode='markers', name='Entry',
+                marker=dict(size=10, color=entry_colors, symbol='triangle-up')
+            ),
+            row=1, col=1
+        )
+    
+    # Row 2: Equity curve
+    fig.add_trace(
+        go.Scatter(
+            x=list(range(len(equity_curve))),
+            y=equity_curve,
+            mode='lines',
+            name='Equity ($)',
+            line=dict(color='#00BFFF', width=2),
+            fill='tozeroy'
+        ),
+        row=2, col=1
+    )
+    
+    # Row 3: Classification probabilities
+    fig.add_trace(
+        go.Scatter(x=dates, y=little_probs[:, 2], mode='lines', name='P(UP)', line=dict(color='green')),
+        row=3, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=dates, y=little_probs[:, 0], mode='lines', name='P(DOWN)', line=dict(color='red')),
+        row=3, col=1
+    )
+    fig.add_trace(
+        go.Scatter(x=dates, y=little_probs[:, 1], mode='lines', name='P(FLAT)', line=dict(color='gray', dash='dash')),
+        row=3, col=1
+    )
+    
+    fig.update_layout(
+        template='plotly_dark',
+        height=900,
+        title='v2.0 Classification Results + Risk Shell'
+    )
     fig.show()
-
+    
+    print("\n  📊 Charts displayed")
+    print("=" * 60)
